@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRD Audio Sidecar</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; }
+  button { font-size: 18px; padding: 10px 20px; }
+  #state { margin-left: 12px; color: #666; }
+  #stats { font: 12px monospace; color: #666; white-space: pre; margin-top: 16px; }
+</style>
+</head>
+<body>
+<h2>CRD Audio Sidecar</h2>
+<button id="btn">연결</button><span id="state">끊김</span>
+<audio id="audio" autoplay playsinline></audio>
+<div id="stats"></div>
+<script>
+const btn = document.getElementById('btn');
+const stateEl = document.getElementById('state');
+const audio = document.getElementById('audio');
+let pc = null, timer = null;
+
+// aiortc는 opus fmtp에 stereo=1을 넣지 않아서 Chrome이 모노로 다운믹스한다 → 직접 추가
+function stereo(sdp) {
+  const m = sdp.match(/a=rtpmap:(\d+) opus\/48000\/2/i);
+  if (!m) return sdp;
+  const pt = m[1];
+  const fmtp = new RegExp(`a=fmtp:${pt} (.*)`);
+  return fmtp.test(sdp)
+    ? sdp.replace(fmtp, (_, p) => `a=fmtp:${pt} ${p};stereo=1;sprop-stereo=1`)
+    : sdp.replace(m[0], `${m[0]}\r\na=fmtp:${pt} stereo=1;sprop-stereo=1`);
+}
+
+async function connect() {
+  pc = new RTCPeerConnection();
+  pc.addTransceiver('audio', { direction: 'recvonly' });
+  // iOS/iPadOS(WebKit)는 클릭 직후에만 재생을 허용하고, 아래 await(fetch 등)를 지나면 허용이 만료된다.
+  // → 빈 스트림으로 클릭 시점에 play()를 먼저 걸어두고, 트랙은 도착하면 그 스트림에 추가한다.
+  const stream = new MediaStream();
+  audio.srcObject = stream;
+  audio.play().catch(e => { stateEl.textContent = '재생 차단: ' + e.name; });
+  pc.ontrack = e => stream.addTrack(e.track);
+  pc.onconnectionstatechange = () => { stateEl.textContent = pc.connectionState; };
+
+  const offer = await pc.createOffer();
+  offer.sdp = stereo(offer.sdp);
+  await pc.setLocalDescription(offer);
+  // aiortc는 ICE 후보를 trickle하지 않으므로 수집 완료 후 한 번에 보낸다
+  await new Promise(r => {
+    if (pc.iceGatheringState === 'complete') return r();
+    pc.addEventListener('icegatheringstatechange', () => pc.iceGatheringState === 'complete' && r());
+  });
+  const res = await fetch('/offer', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type }),
+  });
+  const answer = await res.json();
+  answer.sdp = stereo(answer.sdp);
+  await pc.setRemoteDescription(answer);
+  timer = setInterval(showStats, 1000);
+}
+
+async function showStats() {
+  if (!pc) return;
+  (await pc.getStats()).forEach(s => {
+    if (s.type === 'inbound-rtp' && s.kind === 'audio') {
+      const jb = s.jitterBufferEmittedCount ? (s.jitterBufferDelay / s.jitterBufferEmittedCount * 1000).toFixed(0) : '-';
+      document.getElementById('stats').textContent =
+        `packets: ${s.packetsReceived}  lost: ${s.packetsLost}\njitter buffer: ${jb} ms\nlevel: ${(s.audioLevel ?? 0).toFixed(3)}\naudio: ${audio.paused ? 'paused' : 'playing'}`;
+    }
+  });
+}
+
+function disconnect() {
+  clearInterval(timer);
+  pc.close(); pc = null;
+  audio.srcObject = null;
+  stateEl.textContent = '끊김';
+}
+
+btn.onclick = async () => {
+  if (pc) { disconnect(); btn.textContent = '연결'; return; }
+  btn.disabled = true;
+  try { await connect(); btn.textContent = '끊기'; }
+  catch (e) { stateEl.textContent = '오류: ' + e; pc = null; }
+  btn.disabled = false;
+};
+</script>
+</body>
+</html>
