@@ -284,10 +284,7 @@ async def create_answer(app, sdp, label):
         # 공유기에 이 연결의 UDP 포트를 매핑하고 "공인IP:포트"를 후보로 추가 → 폰이 TURN 없이 직접 닿게
         gatherer = pc.getTransceivers()[0].sender.transport.transport.iceGatherer
         lan = next((c for c in gatherer.getLocalCandidates() if c.type == "host" and c.ip == gw.local_ip), None)
-        fixed = app["args"].upnp_port  # 실험: 통신사가 잘 알려진 UDP 포트만 허용하는지 확인용 (한 번에 1연결)
-        if fixed:
-            await gw.delete_udp(fixed)
-        if lan and (mapped := await gw.add_udp(lan.port, external=fixed)):
+        if lan and (mapped := await gw.add_udp(lan.port)):
             line = upnp.srflx_candidate(gw.external_ip, mapped, lan.ip, lan.port)
             answer = answer.replace("a=end-of-candidates", f"{line}\r\na=end-of-candidates", 1)
             log.info("upnp: %s:%d → %s:%d (peer %s)", gw.external_ip, mapped, lan.ip, lan.port, label)
@@ -298,6 +295,27 @@ async def offer(request):
     params = await request.json()
     sdp = await create_answer(request.app, params["sdp"], request.remote)
     return web.Response(content_type="application/json", text=json.dumps({"sdp": sdp, "type": "answer"}))
+
+
+def pin_ice_port(ip, port):
+    """실험: aioice가 이 IP에 여는 UDP 소켓을 고정 포트로 (비어 있을 때만).
+
+    공유기가 STUN 송신 시 만든 자동 매핑(외부=내부 포트)과 충돌하지 않도록 내부 포트 자체를 맞춘다
+    (외부≠내부 UPnP 매핑은 NETGEAR에서 718 충돌). 통신사가 잘 알려진 UDP 포트만 통과시키는지 확인용.
+    """
+    loop = asyncio.get_running_loop()
+    orig = loop.create_datagram_endpoint
+
+    async def create(factory, local_addr=None, **kw):
+        if local_addr == (ip, 0):
+            try:
+                return await orig(factory, local_addr=(ip, port), **kw)
+            except OSError:
+                log.warning("ICE 포트 %d 사용 중 — 임의 포트로", port)
+        return await orig(factory, local_addr=local_addr, **kw)
+
+    loop.create_datagram_endpoint = create
+    log.info("실험: ICE 소켓을 %s:%d 로 고정", ip, port)
 
 
 async def on_startup(app):
@@ -316,6 +334,8 @@ async def on_startup(app):
                      app["upnp"].control_url, app["upnp"].external_ip, app["upnp"].local_ip)
             if stale := await app["upnp"].cleanup():
                 log.info("upnp: 이전 실행에서 남은 매핑 %d개 삭제", len(stale))
+            if app["args"].upnp_port:
+                pin_ice_port(app["upnp"].local_ip, app["args"].upnp_port)
         else:
             log.warning("upnp: 공유기를 찾지 못함 (UPnP 꺼짐?) — TURN 폴백만 사용")
     if app["args"].signal:
