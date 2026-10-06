@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > (손실 0, 지터버퍼 약 128ms).
 > Phase 2 완료 — `/stream.mp3` (48kHz 스테레오 192kbps), 휴대폰 VLC에서 지연 약 2초 확인
 > (서버 경로 자체는 약 0.4초, 나머지는 VLC 버퍼).
-> Phase 3 구현 — `extension/` (로컬에서 연결·Web Audio 경로 440Hz 수신 확인). 실제 CRD 화면에서 확인 대기.
+> Phase 3 완료 — `extension/`, 윈도우 노트북 크롬의 CRD 화면에서 소리 확인. 다음은 Phase 4 (audiotee).
 
 **문제를 겪고 해결하면 `TROUBLESHOOTING.md`에 기록할 것** (빠른 진단 표 + 증상/원인/진단/해결).
 미해결 항목은 "진행 중"으로 남기고 결과 확인 후 갱신. 사용자용 설치·사용법은 `README.md`.

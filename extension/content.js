@@ -1,7 +1,7 @@
 // CRD 화면 위 스피커 오버레이. RTCPeerConnection·오디오·볼륨은 전부 여기 둔다
 // (MV3 service worker는 유휴 30초쯤 종료되므로). /offer 요청만 background.js가 대신 보낸다.
 (() => {
-  let server = '', on = false, volume = 100;
+  let server = '', on = false, volume = 50;
   let pc = null, ctx = null, gain = null, src = null, audio = null, retryTimer = null;
 
   const host = document.createElement('div');
@@ -19,7 +19,7 @@
     .ok { background: #3c3; } .wait { background: #fc3; } .err { background: #e44; }
   </style>
   <div class="bar"><span class="dot"></span><button title="사이드카 오디오 켜기/끄기">🔇</button>
-  <input type="range" min="0" max="200" step="5"><span class="st"></span></div>`;
+  <input type="range" min="0" max="150" step="5"><span class="st"></span></div>`;
   const [dot, btn, vol, st] = ['.dot', 'button', 'input', '.st'].map(s => root.querySelector(s));
   // 오버레이 조작이 CRD로 넘어가 원격 클릭/키 입력이 되지 않도록 막는다
   for (const t of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick',
@@ -54,12 +54,15 @@
       : sdp.replace(m[0], `${m[0]}\r\na=fmtp:${pt} stereo=1;sprop-stereo=1`);
   }
 
+  // 슬라이더 값 → 게인. 제곱 곡선이라 작은 볼륨 구간을 세밀하게 조절할 수 있다 (50 → 0.25, 약 -12dB)
+  const toGain = v => (v / 100) ** 2;
+
   // 클릭 직후(사용자 제스처 안)에 불러야 AudioContext가 재생 상태로 시작한다
   function setupAudio() {
     if (!ctx) {
       ctx = new AudioContext();
       gain = ctx.createGain();
-      gain.gain.value = volume / 100;
+      gain.gain.value = toGain(volume);
       gain.connect(ctx.destination);
       ctx.onstatechange = () => render();
     }
@@ -141,11 +144,11 @@
   vol.oninput = () => {
     volume = +vol.value;
     vol.title = volume + '%';
-    gain?.gain.setTargetAtTime(volume / 100, ctx.currentTime, 0.02);
+    gain?.gain.setTargetAtTime(toGain(volume), ctx.currentTime, 0.02);
   };
   vol.onchange = () => { chrome.storage.local.set({ volume }); vol.blur(); };
 
-  chrome.storage.local.get({ server: '', on: false, volume: 100 }).then(s => {
+  chrome.storage.local.get({ server: '', on: false, volume: 50 }).then(s => {
     server = s.server;
     volume = s.volume;
     vol.value = volume;
