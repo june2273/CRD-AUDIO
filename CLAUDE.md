@@ -17,7 +17,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > 미검증: 실행 중 출력 장치 전환, 수십 분 이상 장시간 운용(무음 버퍼 버그 워치독).
 >
 > **다음 목표: 일반 사용자 배포 — 설계는 `DEPLOYMENT.md`.** 스파이크 A(클라우드 시그널링·외부망) 로컬 검증 완료,
-> Cloudflare 배포 후 LTE 확인 대기.
+> 배포됨: `https://crd-audio.crd-audio-signaling.workers.dev` (TURN 폴백 포함, LTE에서 소리 확인).
+> 진행 중: UPnP로 TURN 없이 LTE 직접 연결 실험 — 상태와 내일 할 일은 `DEPLOYMENT.md` 상단, `TROUBLESHOOTING.md` #10.
 
 **문제를 겪고 해결하면 `TROUBLESHOOTING.md`에 기록할 것** (빠른 진단 표 + 증상/원인/진단/해결).
 미해결 항목은 "진행 중"으로 남기고 결과 확인 후 갱신. 사용자용 설치·사용법은 `README.md`.

@@ -5,7 +5,11 @@
 > 잘못된 키 무응답, 호스트 꺼짐 알림 확인.
 > 배포(`crd-audio.crd-audio-signaling.workers.dev`) 후 아이폰 LTE: 시그널링 성공, STUN만으로는 P2P 실패
 > (통신사 NAT) → Cloudflare TURN 폴백 추가 후 **LTE에서 소리 확인**.
-> 이 환경: 맥에 공인 IPv6 없음, 공유기 UPnP IGD 응답 있음 → TURN 사용량을 줄이는 UPnP 포트 매핑 검토 중.
+> 이 환경: 맥에 공인 IPv6 없음, 공유기 UPnP IGD 응답 있음 → TURN 사용량을 줄이는 UPnP 포트 매핑 실험 중
+> (`upnp.py`, `server.py --upnp [--upnp-port N]`, 웹 `?turn=0`). 결과는 TROUBLESHOOTING #10.
+> **내일 할 것:** ① 공유기 재부팅(유령 매핑 제거) 후 `--upnp --upnp-port 19302`로 LTE 재시험
+> ② 첫 LTE 시도(STUN만)가 약 15초 뒤 `연결됨`이었는데 무음이었다는 사용자 관찰 재확인 — 진단 정보의
+> `route`/`packets`/`audio` 값을 볼 것. P2P가 실제로 됐다면 TURN 필요성 결론이 바뀐다.
 > TURN 요금: 계정당 월 1,000GB 무료(SFU와 공유), 초과 $0.05/GB.
 
 ## Context
