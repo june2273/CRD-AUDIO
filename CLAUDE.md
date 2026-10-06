@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **현재 상태 (2026-10-06):** Phase 1 완료 — 시스템 출력(BlackHole) → 아이패드 크롬에서 소리 확인됨
 > (손실 0, 지터버퍼 약 128ms).
-> Phase 2 구현됨 — `/stream.mp3` (48kHz 스테레오 192kbps) curl 수신 검증. 휴대폰 VLC 실기 확인 필요.
+> Phase 2 완료 — `/stream.mp3` (48kHz 스테레오 192kbps), 휴대폰 VLC에서 지연 약 2초 확인
+> (서버 경로 자체는 약 0.4초, 나머지는 VLC 버퍼). 다음은 Phase 3 (크롬 확장).
 
 **문제를 겪고 해결하면 `TROUBLESHOOTING.md`에 기록할 것** (빠른 진단 표 + 증상/원인/진단/해결).
 미해결 항목은 "진행 중"으로 남기고 결과 확인 후 갱신. 사용자용 설치·사용법은 `README.md`.

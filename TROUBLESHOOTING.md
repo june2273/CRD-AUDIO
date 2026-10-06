@@ -10,7 +10,7 @@
 | `Failed to fetch` / `ERR_CONNECTION_FAILED` | 서버가 실행 중인지 (`lsof -nP -iTCP:8080 -sTCP:LISTEN`) | [#2](#2-failed-to-fetch--err_connection_failed) |
 | `Failed to parse URL from /offer` | 주소창이 `http://`인지 파일 경로인지 | [#3](#3-failed-to-parse-url-from-offer) |
 | `connected`인데 무음 | 페이지 하단 `level`, `audio` 값 | [#4](#4-아이패드에서-connected인데-소리가-안-남) |
-| 모바일 지연 10초 | 어떤 앱으로 재생 중인지 | [#5](#5-모바일-http-스트림-지연-약-10초) |
+| 모바일 지연 10초 | 브라우저가 아닌 VLC로 재생 중인지 | [#5](#5-모바일-http-스트림-지연-약-10초) |
 | Ctrl+C 후 서버가 1분간 안 꺼짐 | — (수정됨) | [#6](#6-서버-종료가-약-60초-걸림) |
 | `git push` 실패 | SSH 키 암호, `gh auth status` | [#7](#7-github-push-실패) |
 
@@ -63,9 +63,9 @@
 - **증상:** 휴대폰에서 `/stream.mp3` 재생 시 약 10초 지연.
 - **진단:** 서버 경로 지연을 직접 측정 — BlackHole에 톤을 재생한 시각과 스트림에서 톤이 검출된
   시각의 차이 **약 0.4초**. 서버는 원인이 아니다.
-- **원인 (추정):** VLC가 아닌 휴대폰 브라우저로 직접 열어서, 브라우저의 재생 버퍼가 크게 잡힘.
-- **해결 (진행 중):** VLC for Mobile 설치 → 설정에서 네트워크 캐싱을 가장 낮게 →
-  `http://<맥미니IP>:8080/stream.mp3`. 목표 지연 1~3초. *결과 확인 후 이 항목 갱신.*
+- **원인:** VLC가 아닌 휴대폰 브라우저로 직접 열어서, 브라우저의 재생 버퍼가 크게 잡힘.
+- **해결:** VLC for Mobile 설치 → 설정에서 네트워크 캐싱을 가장 낮게 →
+  `http://<맥미니IP>:8080/stream.mp3`. **지연 약 2초로 확인** (목표 1~3초 충족).
 
 ## 6. 서버 종료가 약 60초 걸림
 

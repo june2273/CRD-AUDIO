@@ -64,6 +64,6 @@ python3.12 -m venv .venv
 ## 진행 상황
 
 - [x] Phase 1 — BlackHole 캡처 + WebRTC (아이패드에서 확인)
-- [x] Phase 2 — 모바일용 HTTP MP3 스트림 (VLC 실기 확인 중)
+- [x] Phase 2 — 모바일용 HTTP MP3 스트림 (휴대폰 VLC에서 지연 약 2초 확인)
 - [ ] Phase 3 — 크롬 확장 (CRD 화면 위 스피커 토글 / 볼륨)
 - [ ] Phase 4 — Core Audio 탭(`audiotee`)으로 캡처 교체, BlackHole 의존 제거
