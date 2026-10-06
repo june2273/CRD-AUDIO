@@ -40,7 +40,8 @@ function stereo(sdp) {
 function start() {
   stream = new MediaStream();
   audio.srcObject = stream;
-  audio.play().catch(e => { stateEl.textContent = '재생 차단: ' + e.name; });
+  // AbortError는 끊기(srcObject 해제)로 재생이 중단된 것 — 무시
+  audio.play().catch(e => { if (e.name !== 'AbortError') stateEl.textContent = '재생 차단: ' + e.name; });
   timer = setInterval(showStats, 1000);
   connect();
 }
