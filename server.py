@@ -284,7 +284,10 @@ async def create_answer(app, sdp, label):
         # 공유기에 이 연결의 UDP 포트를 매핑하고 "공인IP:포트"를 후보로 추가 → 폰이 TURN 없이 직접 닿게
         gatherer = pc.getTransceivers()[0].sender.transport.transport.iceGatherer
         lan = next((c for c in gatherer.getLocalCandidates() if c.type == "host" and c.ip == gw.local_ip), None)
-        if lan and (mapped := await gw.add_udp(lan.port)):
+        fixed = app["args"].upnp_port  # 실험: 통신사가 잘 알려진 UDP 포트만 허용하는지 확인용 (한 번에 1연결)
+        if fixed:
+            await gw.delete_udp(fixed)
+        if lan and (mapped := await gw.add_udp(lan.port, external=fixed)):
             line = upnp.srflx_candidate(gw.external_ip, mapped, lan.ip, lan.port)
             answer = answer.replace("a=end-of-candidates", f"{line}\r\na=end-of-candidates", 1)
             log.info("upnp: %s:%d → %s:%d (peer %s)", gw.external_ip, mapped, lan.ip, lan.port, label)
@@ -344,6 +347,7 @@ def main():
     p.add_argument("--bitrate", default="192k", help="MP3 스트림 비트레이트")
     p.add_argument("--signal", help="클라우드 시그널링 주소 (예: wss://crd-audio.<계정>.workers.dev) — 외부망 연결")
     p.add_argument("--upnp", action="store_true", help="공유기 UPnP로 포트 매핑 (실험: TURN 없이 외부망 직접 연결)")
+    p.add_argument("--upnp-port", type=int, help="UPnP 외부 포트 고정 (실험, 예: 3478)")
     p.add_argument("--reset-pairing", action="store_true", help="페어링 키 재발급 (기존 기기 연결 해제)")
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")

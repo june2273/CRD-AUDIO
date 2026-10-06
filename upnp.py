@@ -81,19 +81,20 @@ class Gateway:
             raise RuntimeError(f"{action} 실패 (UPnP 오류 {code.group(1) if code else r.status})")
         return dict(re.findall(r"<(New\w+)>([^<]*)</New\w+>", text))
 
-    async def add_udp(self, port, desc="crd-audio"):
-        """외부 포트 = 내부 포트로 매핑. 성공하면 외부 포트, 실패하면 None."""
-        args = {"NewRemoteHost": "", "NewExternalPort": port, "NewProtocol": "UDP", "NewInternalPort": port,
+    async def add_udp(self, port, desc="crd-audio", external=None):
+        """UDP 매핑 (외부 포트 기본값 = 내부 포트). 성공하면 외부 포트, 실패하면 None."""
+        external = external or port
+        args = {"NewRemoteHost": "", "NewExternalPort": external, "NewProtocol": "UDP", "NewInternalPort": port,
                 "NewInternalClient": self.local_ip, "NewEnabled": 1, "NewPortMappingDescription": desc,
                 "NewLeaseDuration": LEASE}
         try:
             await self._soap("AddPortMapping", args)
         except RuntimeError as e:
             if "725" not in str(e):  # 725: 영구 매핑만 지원하는 공유기 → 기간 0으로 재시도
-                log.warning("%s (포트 %d)", e, port)
+                log.warning("%s (포트 %d)", e, external)
                 return None
             await self._soap("AddPortMapping", {**args, "NewLeaseDuration": 0})
-        return port
+        return external
 
     async def cleanup(self, desc="crd-audio"):
         """이전 실행이 비정상 종료돼 남은 이 맥의 매핑 삭제 (영구 매핑만 받는 공유기 대비)."""

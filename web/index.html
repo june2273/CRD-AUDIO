@@ -157,10 +157,13 @@ async function showStats() {
   if (!pc) return;
   const stats = await pc.getStats();
   const types = kind => [...new Set([...stats.values()].filter(s => s.type === kind).map(s => s.candidateType))].join(',') || '-';
-  let route = '-', pairs = 0, audioLine = '';
+  let route = '-', pairs = 0, audioLine = '', pairLines = '';
   stats.forEach(s => {
     if (s.type === 'candidate-pair') {
       pairs++;
+      // 쌍별 연결 확인 요청/응답 수 — 어느 경로에서 막히는지 진단용
+      const r = stats.get(s.remoteCandidateId);
+      pairLines += `\n  → ${r?.candidateType} ${r?.address ?? '?'}:${r?.port ?? '?'} ${s.state} req ${s.requestsSent ?? '-'}/${s.responsesReceived ?? '-'}`;
       if (s.nominated && s.state === 'succeeded')
         route = `${stats.get(s.localCandidateId)?.candidateType} → ${stats.get(s.remoteCandidateId)?.candidateType}`;
     }
@@ -170,7 +173,7 @@ async function showStats() {
     }
   });
   document.getElementById('stats').textContent =
-    `ice: ${pc.iceGatheringState} / ${pc.iceConnectionState}\nlocal: ${types('local-candidate')}  remote: ${types('remote-candidate')}  pairs: ${pairs}\nroute: ${route}` + audioLine;
+    `ice: ${pc.iceGatheringState} / ${pc.iceConnectionState}\nlocal: ${types('local-candidate')}  remote: ${types('remote-candidate')}  pairs: ${pairs}${pairLines}\nroute: ${route}` + audioLine;
 }
 
 function stop() {
