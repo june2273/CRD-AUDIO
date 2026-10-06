@@ -85,4 +85,4 @@ python3.12 -m venv .venv
 - [x] Phase 1 — BlackHole 캡처 + WebRTC (아이패드에서 확인)
 - [x] Phase 2 — 모바일용 HTTP MP3 스트림 (휴대폰 VLC에서 지연 약 2초 확인)
 - [x] Phase 3 — 크롬 확장 (CRD 화면 위 스피커 토글 / 볼륨, 윈도우 노트북 크롬에서 확인)
-- [ ] Phase 4 — Core Audio 탭(`audiotee`)으로 캡처 교체, BlackHole 의존 제거 — 구현 완료, iTerm2 권한 부여 후 실제 소리 확인 대기
+- [x] Phase 4 — Core Audio 탭(`audiotee`)으로 캡처 교체, BlackHole 의존 제거 (평소 출력 장치 그대로, 아이폰에서 확인)

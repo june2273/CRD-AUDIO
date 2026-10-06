@@ -11,8 +11,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > Phase 3 완료 — `extension/`, 윈도우 노트북 크롬의 CRD 화면에서 소리 확인.
 > iOS: 아이폰 Safari의 WebRTC 페이지가 CRD 앱으로 전환해도 끊기지 않음을 확인 → 모바일 기본 경로는
 > `static/index.html`(약 0.13초), VLC/MP3는 예비.
-> Phase 4 구현 — 기본 캡처가 audiotee(Core Audio 탭). 탭 생성·프로세스 관리는 확인, Claude Code 셸엔
-> TCC 권한이 없어 무음 → iTerm2에 권한 부여 후 실제 소리 확인 대기.
+> Phase 4 완료 — 기본 캡처가 audiotee(Core Audio 탭). iTerm2에 시스템 오디오 녹음 권한 부여 후
+> 평소 출력 장치 그대로 `capture_test.py --tap` OK, 아이폰에서 소리 확인. BlackHole은 예비(`--capture blackhole`).
+> Claude Code 셸에는 TCC 권한이 없어 탭이 무음 → 탭 캡처 검증은 사용자의 iTerm2에서.
+> 미검증: 실행 중 출력 장치 전환, 수십 분 이상 장시간 운용(무음 버퍼 버그 워치독).
 
 **문제를 겪고 해결하면 `TROUBLESHOOTING.md`에 기록할 것** (빠른 진단 표 + 증상/원인/진단/해결).
 미해결 항목은 "진행 중"으로 남기고 결과 확인 후 갱신. 사용자용 설치·사용법은 `README.md`.
