@@ -8,7 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > (손실 0, 지터버퍼 약 128ms).
 > Phase 2 완료 — `/stream.mp3` (48kHz 스테레오 192kbps), 휴대폰 VLC에서 지연 약 2초 확인
 > (서버 경로 자체는 약 0.4초, 나머지는 VLC 버퍼).
-> Phase 3 완료 — `extension/`, 윈도우 노트북 크롬의 CRD 화면에서 소리 확인. 다음은 Phase 4 (audiotee).
+> Phase 3 완료 — `extension/`, 윈도우 노트북 크롬의 CRD 화면에서 소리 확인.
+> iOS: 아이폰 Safari의 WebRTC 페이지가 CRD 앱으로 전환해도 끊기지 않음을 확인 → 모바일 기본 경로는
+> `static/index.html`(약 0.13초), VLC/MP3는 예비. 다음은 Phase 4 (audiotee).
 
 **문제를 겪고 해결하면 `TROUBLESHOOTING.md`에 기록할 것** (빠른 진단 표 + 증상/원인/진단/해결).
 미해결 항목은 "진행 중"으로 남기고 결과 확인 후 갱신. 사용자용 설치·사용법은 `README.md`.
@@ -38,6 +40,8 @@ curl -s -m 6 -o /tmp/t.mp3 http://127.0.0.1:8080/stream.mp3 && ffprobe /tmp/t.mp
   `await` 이후에 `srcObject`를 붙이면 stats의 level은 올라오는데 무음이 된다 → 클릭 시점에 빈
   `MediaStream`으로 `play()`를 먼저 걸고 `ontrack`에서 트랙을 추가한다.
   Phase 3 확장 content script로 옮길 때 이 세 가지 유지할 것.
+  iOS 기기용 실사용 페이지이기도 하다: 재연결 시 같은 `MediaStream`/`<audio>`를 재사용해야 백그라운드에서도
+  제스처 없이 복구된다. iOS는 `audio.volume`이 읽기 전용이라 볼륨 UI를 두지 않는다.
 - `extension/` — MV3 크롬 확장. `content.js`가 CRD 페이지에 Shadow DOM 오버레이를 넣고
   RTCPeerConnection·AudioContext·GainNode를 직접 가진다(service worker 유휴 종료 회피).
   `/offer` POST만 `background.js`가 대신 보낸다: https 페이지의 content script에서 `http://<IP>`로
@@ -195,7 +199,9 @@ Phase 1이 완전히 돌아간 뒤에만 착수. **캡처 부분만** 갈아끼�
 
 ### 모바일
 - 휴대폰 CRD는 **네이티브 앱**이라 확장프로그램이 들어갈 자리가 없다.
-  → 화면은 CRD 앱, 소리는 별도 앱(VLC 등) 2개 동시 운용 구조.
+  → 화면은 CRD 앱, 소리는 Safari(WebRTC 페이지) 또는 VLC 2개 동시 운용 구조.
+- (2026-10 확인) 아이폰 Safari WebRTC 오디오는 CRD 앱으로 전환해도 끊기지 않았다. 아래 "백그라운드로 가면
+  끊긴다"는 예전 가정이며, 끊기는 기기/iOS 버전이 있으면 VLC로 대체.
 - 아이패드는 스플릿뷰로 CRD + 사파리를 나란히 띄우면 백그라운드 문제 회피 가능.
 
 ### 데스크톱 크롬

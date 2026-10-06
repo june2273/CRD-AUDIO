@@ -6,9 +6,10 @@
 <title>CRD Audio Sidecar</title>
 <style>
   body { font-family: -apple-system, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; }
-  button { font-size: 18px; padding: 10px 20px; }
-  #state { margin-left: 12px; color: #666; }
-  #stats { font: 12px monospace; color: #666; white-space: pre; margin-top: 16px; }
+  button { width: 100%; font-size: 22px; padding: 18px; border: 0; border-radius: 14px; background: #1a73e8; color: #fff; }
+  button.on { background: #5f6368; }
+  #state { display: block; margin-top: 12px; color: #666; text-align: center; }
+  #stats { font: 12px monospace; color: #999; white-space: pre; margin-top: 24px; }
 </style>
 </head>
 <body>
@@ -20,7 +21,7 @@
 const btn = document.getElementById('btn');
 const stateEl = document.getElementById('state');
 const audio = document.getElementById('audio');
-let pc = null, timer = null;
+let pc = null, stream = null, timer = null, retryTimer = null;
 
 // aiortc는 opus fmtp에 stereo=1을 넣지 않아서 Chrome이 모노로 다운믹스한다 → 직접 추가
 function stereo(sdp) {
@@ -33,33 +34,55 @@ function stereo(sdp) {
     : sdp.replace(m[0], `${m[0]}\r\na=fmtp:${pt} stereo=1;sprop-stereo=1`);
 }
 
-async function connect() {
-  pc = new RTCPeerConnection();
-  pc.addTransceiver('audio', { direction: 'recvonly' });
-  // iOS/iPadOS(WebKit)는 클릭 직후에만 재생을 허용하고, 아래 await(fetch 등)를 지나면 허용이 만료된다.
-  // → 빈 스트림으로 클릭 시점에 play()를 먼저 걸어두고, 트랙은 도착하면 그 스트림에 추가한다.
-  const stream = new MediaStream();
+// iOS/iPadOS(WebKit)는 클릭 직후에만 재생을 허용하고, await(fetch 등)를 지나면 허용이 만료된다.
+// → 클릭 시점에 빈 스트림으로 play()를 먼저 걸어두고, 트랙은 도착하면 그 스트림에 넣는다.
+// 재연결 때도 같은 스트림·엘리먼트를 계속 쓰므로 다시 클릭할 필요가 없다 (백그라운드에서도 복구).
+function start() {
+  stream = new MediaStream();
   audio.srcObject = stream;
   audio.play().catch(e => { stateEl.textContent = '재생 차단: ' + e.name; });
-  pc.ontrack = e => stream.addTrack(e.track);
-  pc.onconnectionstatechange = () => { stateEl.textContent = pc.connectionState; };
-
-  const offer = await pc.createOffer();
-  offer.sdp = stereo(offer.sdp);
-  await pc.setLocalDescription(offer);
-  // aiortc는 ICE 후보를 trickle하지 않으므로 수집 완료 후 한 번에 보낸다
-  await new Promise(r => {
-    if (pc.iceGatheringState === 'complete') return r();
-    pc.addEventListener('icegatheringstatechange', () => pc.iceGatheringState === 'complete' && r());
-  });
-  const res = await fetch('/offer', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type }),
-  });
-  const answer = await res.json();
-  answer.sdp = stereo(answer.sdp);
-  await pc.setRemoteDescription(answer);
   timer = setInterval(showStats, 1000);
+  connect();
+}
+
+async function connect() {
+  const p = pc = new RTCPeerConnection();
+  p.addTransceiver('audio', { direction: 'recvonly' });
+  p.ontrack = e => {
+    stream.getTracks().forEach(t => stream.removeTrack(t));
+    stream.addTrack(e.track);
+  };
+  p.onconnectionstatechange = () => {
+    if (p !== pc) return;
+    if (p.connectionState === 'failed') retry('연결 끊김');
+    else stateEl.textContent = { connected: '연결됨', connecting: '연결 중' }[p.connectionState] ?? p.connectionState;
+  };
+  stateEl.textContent = '연결 중';
+  try {
+    const offer = await p.createOffer();
+    offer.sdp = stereo(offer.sdp);
+    await p.setLocalDescription(offer);
+    // aiortc는 ICE 후보를 trickle하지 않으므로 수집 완료 후 한 번에 보낸다
+    await new Promise(r => {
+      if (p.iceGatheringState === 'complete') return r();
+      p.addEventListener('icegatheringstatechange', () => p.iceGatheringState === 'complete' && r());
+    });
+    const res = await fetch('/offer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sdp: p.localDescription.sdp, type: p.localDescription.type }),
+    });
+    const answer = await res.json();
+    answer.sdp = stereo(answer.sdp);
+    if (p === pc) await p.setRemoteDescription(answer);
+  } catch (e) {
+    if (p === pc) retry(e.message);
+  }
+}
+
+function retry(err) {
+  pc.close(); pc = null;
+  stateEl.textContent = err + ' — 3초 후 재연결';
+  retryTimer = setTimeout(connect, 3000);
 }
 
 async function showStats() {
@@ -73,19 +96,19 @@ async function showStats() {
   });
 }
 
-function disconnect() {
+function stop() {
   clearInterval(timer);
-  pc.close(); pc = null;
-  audio.srcObject = null;
+  clearTimeout(retryTimer);
+  pc?.close(); pc = null;
+  audio.srcObject = stream = null;
   stateEl.textContent = '끊김';
 }
 
-btn.onclick = async () => {
-  if (pc) { disconnect(); btn.textContent = '연결'; return; }
-  btn.disabled = true;
-  try { await connect(); btn.textContent = '끊기'; }
-  catch (e) { stateEl.textContent = '오류: ' + e; pc = null; }
-  btn.disabled = false;
+btn.onclick = () => {
+  const on = !stream;
+  on ? start() : stop();
+  btn.textContent = on ? '끊기' : '연결';
+  btn.classList.toggle('on', on);
 };
 </script>
 </body>
