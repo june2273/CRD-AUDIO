@@ -13,6 +13,7 @@
 | 모바일 지연 10초 | 브라우저가 아닌 VLC로 재생 중인지 | [#5](#5-모바일-http-스트림-지연-약-10초) |
 | Ctrl+C 후 서버가 1분간 안 꺼짐 | — (수정됨) | [#6](#6-서버-종료가-약-60초-걸림) |
 | `git push` 실패 | SSH 키 암호, `gh auth status` | [#7](#7-github-push-실패) |
+| 탭 캡처(`--tap`)가 무음 | 실행한 터미널 앱의 시스템 오디오 녹음 권한 | [#8](#8-탭-캡처가-에러-없이-무음-진행-중) |
 
 ### `level` 값으로 원인 가르기 (테스트 페이지 하단)
 
@@ -89,6 +90,16 @@
     git -c credential.helper= -c "credential.helper=!/opt/homebrew/bin/gh auth git-credential" \
       push https://github.com/june2273/CRD-AUDIO.git main
     ```
+
+## 8. 탭 캡처가 에러 없이 무음 (진행 중)
+
+- **증상:** `audiotee`가 탭 생성·장치 준비까지 정상 로그를 내고 PCM도 나오는데 전부 0.
+  440Hz 톤을 재생하며 녹음해도 peak 0.
+- **원인:** TCC(시스템 오디오 녹음) 권한 없음. 권한은 **실행한 앱**(iTerm2, Claude Code 셸 등)에 묶이고,
+  미허용이면 에러 없이 0만 들어온다. iTerm2는 프롬프트를 안 띄우는 경우가 있다 (audiotee README).
+- **해결:** 시스템 설정 > 개인정보 보호 및 보안 > 화면 및 시스템 오디오 녹음 > 시스템 오디오 녹음 전용에
+  iTerm2 추가·허용 → iTerm2 재시작 → `capture_test.py --tap`.
+- **상태:** Claude Code 셸에서 재현(무음). iTerm2 권한 부여 후 결과 확인 필요.
 
 ---
 

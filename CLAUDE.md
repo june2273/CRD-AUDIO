@@ -10,7 +10,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > (서버 경로 자체는 약 0.4초, 나머지는 VLC 버퍼).
 > Phase 3 완료 — `extension/`, 윈도우 노트북 크롬의 CRD 화면에서 소리 확인.
 > iOS: 아이폰 Safari의 WebRTC 페이지가 CRD 앱으로 전환해도 끊기지 않음을 확인 → 모바일 기본 경로는
-> `static/index.html`(약 0.13초), VLC/MP3는 예비. 다음은 Phase 4 (audiotee).
+> `static/index.html`(약 0.13초), VLC/MP3는 예비.
+> Phase 4 구현 — 기본 캡처가 audiotee(Core Audio 탭). 탭 생성·프로세스 관리는 확인, Claude Code 셸엔
+> TCC 권한이 없어 무음 → iTerm2에 권한 부여 후 실제 소리 확인 대기.
 
 **문제를 겪고 해결하면 `TROUBLESHOOTING.md`에 기록할 것** (빠른 진단 표 + 증상/원인/진단/해결).
 미해결 항목은 "진행 중"으로 남기고 결과 확인 후 갱신. 사용자용 설치·사용법은 `README.md`.
@@ -19,20 +21,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt   # Python 3.14는 aiortc/av 휠 때문에 피함
+./build_audiotee.sh                            # audiotee 고정 커밋(56ac954369) 빌드 → vendor/ (gitignore)
+.venv/bin/python capture_test.py --tap -s 5    # 탭 캡처 검증 (실행한 터미널 앱에 시스템 오디오 녹음 권한 필요)
 .venv/bin/python capture_test.py --self-test   # BlackHole 출력에 440Hz 톤을 재생하며 녹음 → 시스템 출력 설정 없이 캡처 경로 검증
-.venv/bin/python capture_test.py -s 5          # 실제 시스템 오디오 녹음 (시스템 출력이 BlackHole/Multi-Output이어야 함)
-.venv/bin/python server.py --port 8080         # 데스크톱: http://<맥미니IP>:8080 → '연결'
+.venv/bin/python capture_test.py -s 5          # BlackHole로 실제 시스템 오디오 녹음 (시스템 출력이 BlackHole/Multi-Output이어야 함)
+.venv/bin/python server.py --port 8080         # 기본 --capture tap. 예비: --capture blackhole
+                                               # 데스크톱: http://<맥미니IP>:8080 → '연결'
                                                # 모바일 VLC: http://<맥미니IP>:8080/stream.mp3
 curl -s -m 6 -o /tmp/t.mp3 http://127.0.0.1:8080/stream.mp3 && ffprobe /tmp/t.mp3   # HTTP 스트림 단독 확인
 ```
 
 ## 코드 구조
-- `server.py` — sounddevice 콜백(별도 스레드)이 20ms(960샘플) int16 프레임을 `Broadcaster`에
-  넣고, 피어마다 `CaptureTrack`이 자기 큐(최대 5프레임, 넘치면 오래된 것 버림)에서 꺼내
+- `server.py` — 캡처가 20ms(960샘플) int16 스테레오 프레임을 `Broadcaster`에 넣고, 피어마다 `CaptureTrack`이 자기 큐(최대 5프레임, 넘치면 오래된 것 버림)에서 꺼내
   `av.AudioFrame`으로 aiortc에 넘긴다. 캡처 스트림은 서버 시작 시 1개만 열고 모든 피어가 공유.
   `Mp3Encoder`도 같은 Broadcaster를 구독해 ffmpeg 1개(stdin PCM → stdout MP3)로 인코딩하고
-  `/stream.mp3` 청취자들에게 나눠준다. ffmpeg가 BlackHole을 따로 열지 않는 이유: 캡처 지점을 하나로 유지.
-  **Phase 4에서는 `start_capture()`만 audiotee 파이프로 교체하면 WebRTC/HTTP 둘 다 바뀐다.**
+  `/stream.mp3` 청취자들에게 나눠준다. ffmpeg가 캡처 장치를 따로 열지 않는 이유: 캡처 지점을 하나로 유지.
+  캡처 구현은 둘: `TapCapture`(기본) — `audiotee --stereo --sample-rate 48000 --chunk-duration 0.02`
+  하위 프로세스의 stdout s16le를 읽는다. 종료되면 1초 후 재시작, 60초 완전 무음이면 탭을 재생성
+  (장시간 무음 버퍼 버그·출력 장치 변경 대응 — audiotee 자체는 기본 출력 장치 변경을 처리하지 않음).
+  진짜 무음일 때도 60초마다 재생성되지만 무해하며 로그는 첫 회만 남긴다. 종료 시 SIGTERM(탭/aggregate 정리).
+  `BlackHoleCapture` — sounddevice 콜백(별도 스레드) → `push_threadsafe`.
   외부 의존: Homebrew `ffmpeg` (libmp3lame 포함).
 - `static/index.html` — 테스트 페이지. aiortc가 opus fmtp에 `stereo=1`을 넣지 않아 Chrome이
   모노로 다운믹스하므로 offer/answer SDP를 둘 다 수정한다. aiortc는 trickle ICE를 안 하므로

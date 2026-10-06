@@ -1,14 +1,16 @@
 """BlackHole 2ch 오디오 사이드카 서버.
 
 사용법:
-  python server.py [--port 8080] [--device "BlackHole 2ch"]
+  python server.py [--port 8080] [--capture tap|blackhole]
   데스크톱: http://<맥미니IP>:8080 열고 '연결' 클릭 (WebRTC, 저지연)
   모바일:   VLC에서 http://<맥미니IP>:8080/stream.mp3 열기 (HTTP 스트림, 백그라운드 재생)
 
-구조: 캡처(sounddevice 콜백 스레드) → Broadcaster(구독자별 asyncio 큐)
+구조: 캡처 → Broadcaster(구독자별 asyncio 큐)
        ├→ CaptureTrack.recv() → aiortc Opus → WebRTC
        └→ Mp3Encoder: ffmpeg stdin → MP3 → /stream.mp3 클라이언트들
-     Phase 4에서는 Broadcaster에 프레임을 넣는 캡처 부분만 audiotee로 교체한다.
+     캡처는 둘 중 하나 (Broadcaster에 20ms int16 스테레오 프레임을 넣는 것만 같으면 된다):
+       - TapCapture (기본): audiotee(Core Audio 탭) stdout. 출력 장치를 바꿀 필요 없음
+       - BlackHoleCapture: sounddevice로 BlackHole 2ch 입력 (시스템 출력이 BlackHole이어야 함)
 """
 import argparse
 import asyncio
@@ -27,6 +29,8 @@ RATE = 48000
 CHANNELS = 2
 FRAME = 960  # 20ms @ 48kHz — Opus 프레임 크기와 일치
 MAX_QUEUE = 5  # 구독자당 최대 100ms 버퍼. 넘치면 오래된 프레임 버림 (지연 누적 방지)
+FRAME_BYTES = FRAME * CHANNELS * 2
+SILENCE_RESTART = 60 * RATE // FRAME  # 완전 무음 60초 → 탭 재생성 (장시간 무음 버퍼 버그·출력 장치 변경 대응)
 
 log = logging.getLogger("sidecar")
 ROOT = Path(__file__).parent
@@ -131,17 +135,98 @@ class Mp3Encoder:
             await self.proc.wait()
 
 
-def start_capture(device, broadcaster):
-    def callback(indata, frames, time_info, status):
-        if status:
-            log.warning("capture status: %s", status)
-        broadcaster.push_threadsafe(indata.copy())
+class BlackHoleCapture:
+    def __init__(self, broadcaster, device):
+        self.broadcaster = broadcaster
+        self.device = device
 
-    stream = sd.InputStream(device=device, samplerate=RATE, channels=CHANNELS,
-                            dtype="int16", blocksize=FRAME, callback=callback)
-    stream.start()
-    log.info("capturing from %s @ %d Hz", device, RATE)
-    return stream
+    async def start(self):
+        def callback(indata, frames, time_info, status):
+            if status:
+                log.warning("capture status: %s", status)
+            self.broadcaster.push_threadsafe(indata.copy())
+
+        self.stream = sd.InputStream(device=self.device, samplerate=RATE, channels=CHANNELS,
+                                     dtype="int16", blocksize=FRAME, callback=callback)
+        self.stream.start()
+        log.info("capturing from %s @ %d Hz", self.device, RATE)
+
+    async def stop(self):
+        self.stream.stop()
+        self.stream.close()
+
+
+class TapCapture:
+    """audiotee(Core Audio 탭)를 하위 프로세스로 띄워 stdout PCM을 읽는다. 죽거나 무음이 길면 재시작.
+
+    권한(TCC)은 서버를 실행한 앱(iTerm2 등)에 묶이고, 미허용이면 에러 없이 0만 들어온다.
+    """
+
+    def __init__(self, broadcaster, binary):
+        self.broadcaster = broadcaster
+        self.binary = binary
+        self.proc = None
+        self.task = None
+
+    async def start(self):
+        if not Path(self.binary).exists():
+            raise SystemExit(f"audiotee 없음: {self.binary} — ./build_audiotee.sh 실행")
+        self.task = asyncio.create_task(self._run())
+
+    async def _run(self):
+        silent_streak = 0  # 연속 재생성 횟수 — 로그 반복 방지용
+        while True:
+            self.proc = await asyncio.create_subprocess_exec(
+                self.binary, "--stereo", "--sample-rate", str(RATE), "--chunk-duration", str(FRAME / RATE),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stderr_task = asyncio.create_task(self._log_stderr(self.proc.stderr))
+            if not silent_streak:
+                log.info("capturing system audio via audiotee (pid %d) @ %d Hz", self.proc.pid, RATE)
+            zeros = 0
+            try:
+                while zeros < SILENCE_RESTART:
+                    pcm = np.frombuffer(await self.proc.stdout.readexactly(FRAME_BYTES), dtype=np.int16)
+                    self.broadcaster._push(pcm.reshape(-1, CHANNELS))
+                    zeros = zeros + 1 if not pcm.any() else 0
+                    if zeros == 0:
+                        silent_streak = 0
+                silent_streak += 1
+                if silent_streak == 1:
+                    log.info("60초간 완전 무음 → 탭 재생성 (무음이 계속되면 60초마다 조용히 반복)")
+                await self._terminate()
+            except asyncio.IncompleteReadError:
+                code = await self.proc.wait()
+                log.error("audiotee exited (code %s) — 1초 후 재시작", code)
+                silent_streak = 0
+                await asyncio.sleep(1)
+            finally:
+                stderr_task.cancel()
+
+    @staticmethod
+    async def _log_stderr(stream):
+        # audiotee 로그는 JSON 줄. debug/info는 버리고 나머지만 남긴다
+        while line := await stream.readline():
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            if msg.get("message_type") in ("error", "warning"):
+                log.warning("audiotee: %s %s", msg.get("data", {}).get("message"), msg.get("data", {}).get("context", ""))
+
+    async def _terminate(self):
+        if self.proc.returncode is None:
+            self.proc.terminate()  # SIGTERM → audiotee가 탭/aggregate 장치를 정리하고 종료
+            try:
+                await asyncio.wait_for(self.proc.wait(), 2)
+            except asyncio.TimeoutError:
+                self.proc.kill()
+                await self.proc.wait()
+
+    async def stop(self):
+        if self.task:
+            self.task.cancel()
+        if self.proc:
+            await self._terminate()
 
 
 async def index(request):
@@ -189,15 +274,18 @@ async def offer(request):
 
 async def on_startup(app):
     app["broadcaster"] = Broadcaster(asyncio.get_running_loop())
-    app["stream"] = start_capture(app["device"], app["broadcaster"])
-    app["mp3"] = Mp3Encoder(app["broadcaster"], app["bitrate"])
+    if app["args"].capture == "tap":
+        app["capture"] = TapCapture(app["broadcaster"], app["args"].audiotee)
+    else:
+        app["capture"] = BlackHoleCapture(app["broadcaster"], app["args"].device)
+    await app["capture"].start()
+    app["mp3"] = Mp3Encoder(app["broadcaster"], app["args"].bitrate)
     await app["mp3"].start()
 
 
 async def on_shutdown(app):
     await app["mp3"].stop()
-    app["stream"].stop()
-    app["stream"].close()
+    await app["capture"].stop()
     await asyncio.gather(*(pc.close() for pc in app["pcs"]))
 
 
@@ -205,14 +293,16 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
-    p.add_argument("--device", default="BlackHole 2ch")
+    p.add_argument("--capture", choices=["tap", "blackhole"], default="tap",
+                   help="tap: Core Audio 탭(audiotee), blackhole: BlackHole 2ch 입력")
+    p.add_argument("--audiotee", default=str(ROOT / "vendor/audiotee/.build/release/audiotee"))
+    p.add_argument("--device", default="BlackHole 2ch", help="--capture blackhole일 때 입력 장치")
     p.add_argument("--bitrate", default="192k", help="MP3 스트림 비트레이트")
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
     app = web.Application()
-    app["device"] = args.device
-    app["bitrate"] = args.bitrate
+    app["args"] = args
     app["pcs"] = set()
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
