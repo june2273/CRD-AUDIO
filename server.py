@@ -114,10 +114,18 @@ class Mp3Encoder:
                     q.get_nowait()  # 느린 클라이언트는 오래된 청크를 버림 (MP3 디코더는 프레임 경계에서 재동기화)
                 q.put_nowait(chunk)
         log.error("ffmpeg exited (code %s)", await self.proc.wait())
+        self._close_clients()
+
+    def _close_clients(self):
+        for q in self.clients:
+            if q.full():
+                q.get_nowait()
+            q.put_nowait(None)  # 청취자 핸들러 종료 신호 — 없으면 종료 시 aiohttp가 60초간 대기
 
     async def stop(self):
         for t in self.tasks:
             t.cancel()
+        self._close_clients()
         if self.proc.returncode is None:
             self.proc.kill()
             await self.proc.wait()
@@ -148,8 +156,8 @@ async def stream_mp3(request):
     resp = web.StreamResponse(headers={"Content-Type": "audio/mpeg", "Cache-Control": "no-cache"})
     await resp.prepare(request)
     try:
-        while True:
-            await resp.write(await q.get())
+        while (chunk := await q.get()) is not None:
+            await resp.write(chunk)
     except (ConnectionResetError, asyncio.CancelledError):
         pass
     finally:
