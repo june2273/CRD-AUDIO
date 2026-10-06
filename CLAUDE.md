@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # 크롬 원격데스크톱 오디오 사이드카 — 작업 인계서
 
 > **현재 상태 (2026-10-06):** Phase 1 완료 — 시스템 출력(BlackHole) → 아이패드 크롬에서 소리 확인됨
-> (손실 0, 지터버퍼 약 128ms). 다음은 Phase 2 (모바일 VLC용 HTTP 스트림).
+> (손실 0, 지터버퍼 약 128ms).
+> Phase 2 구현됨 — `/stream.mp3` (48kHz 스테레오 192kbps) curl 수신 검증. 휴대폰 VLC 실기 확인 필요.
 
 ## 명령어
 
@@ -13,14 +14,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt   # Python 3.14는 aiortc/av 휠 때문에 피함
 .venv/bin/python capture_test.py --self-test   # BlackHole 출력에 440Hz 톤을 재생하며 녹음 → 시스템 출력 설정 없이 캡처 경로 검증
 .venv/bin/python capture_test.py -s 5          # 실제 시스템 오디오 녹음 (시스템 출력이 BlackHole/Multi-Output이어야 함)
-.venv/bin/python server.py --port 8080         # 이후 http://<맥미니IP>:8080 → '연결'
+.venv/bin/python server.py --port 8080         # 데스크톱: http://<맥미니IP>:8080 → '연결'
+                                               # 모바일 VLC: http://<맥미니IP>:8080/stream.mp3
+curl -s -m 6 -o /tmp/t.mp3 http://127.0.0.1:8080/stream.mp3 && ffprobe /tmp/t.mp3   # HTTP 스트림 단독 확인
 ```
 
 ## 코드 구조
 - `server.py` — sounddevice 콜백(별도 스레드)이 20ms(960샘플) int16 프레임을 `Broadcaster`에
   넣고, 피어마다 `CaptureTrack`이 자기 큐(최대 5프레임, 넘치면 오래된 것 버림)에서 꺼내
   `av.AudioFrame`으로 aiortc에 넘긴다. 캡처 스트림은 서버 시작 시 1개만 열고 모든 피어가 공유.
-  **Phase 4에서는 `start_capture()`만 audiotee 파이프로 교체하면 된다.**
+  `Mp3Encoder`도 같은 Broadcaster를 구독해 ffmpeg 1개(stdin PCM → stdout MP3)로 인코딩하고
+  `/stream.mp3` 청취자들에게 나눠준다. ffmpeg가 BlackHole을 따로 열지 않는 이유: 캡처 지점을 하나로 유지.
+  **Phase 4에서는 `start_capture()`만 audiotee 파이프로 교체하면 WebRTC/HTTP 둘 다 바뀐다.**
+  외부 의존: Homebrew `ffmpeg` (libmp3lame 포함).
 - `static/index.html` — 테스트 페이지. aiortc가 opus fmtp에 `stereo=1`을 넣지 않아 Chrome이
   모노로 다운믹스하므로 offer/answer SDP를 둘 다 수정한다. aiortc는 trickle ICE를 안 하므로
   ICE 수집 완료 후 offer를 한 번에 보낸다. iOS/iPadOS(WebKit)는 클릭 직후에만 재생을 허용해서
