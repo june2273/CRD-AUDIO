@@ -15,6 +15,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > 평소 출력 장치 그대로 `capture_test.py --tap` OK, 아이폰에서 소리 확인. BlackHole은 예비(`--capture blackhole`).
 > Claude Code 셸에는 TCC 권한이 없어 탭이 무음 → 탭 캡처 검증은 사용자의 iTerm2에서.
 > 미검증: 실행 중 출력 장치 전환, 수십 분 이상 장시간 운용(무음 버퍼 버그 워치독).
+>
+> **다음 목표: 일반 사용자 배포 — 설계는 `DEPLOYMENT.md`.** 스파이크 A(클라우드 시그널링·외부망) 로컬 검증 완료,
+> Cloudflare 배포 후 LTE 확인 대기.
 
 **문제를 겪고 해결하면 `TROUBLESHOOTING.md`에 기록할 것** (빠른 진단 표 + 증상/원인/진단/해결).
 미해결 항목은 "진행 중"으로 남기고 결과 확인 후 갱신. 사용자용 설치·사용법은 `README.md`.
@@ -31,6 +34,11 @@ python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt   # Python
                                                # 데스크톱: http://<맥미니IP>:8080 → '연결'
                                                # 모바일 VLC: http://<맥미니IP>:8080/stream.mp3
 curl -s -m 6 -o /tmp/t.mp3 http://127.0.0.1:8080/stream.mp3 && ffprobe /tmp/t.mp3   # HTTP 스트림 단독 확인
+
+# 외부망 (스파이크 A)
+cd signaling && npm install && npx wrangler dev --port 8787     # 로컬 시그널링 + web/ 서빙
+.venv/bin/python server.py --signal ws://127.0.0.1:8787         # 페어링 링크·QR 출력 (localhost에서만 crypto.subtle 동작)
+cd signaling && npx wrangler deploy                             # 배포 → server.py --signal wss://crd-audio.<계정>.workers.dev
 ```
 
 ## 코드 구조
@@ -52,6 +60,13 @@ curl -s -m 6 -o /tmp/t.mp3 http://127.0.0.1:8080/stream.mp3 && ffprobe /tmp/t.mp
   Phase 3 확장 content script로 옮길 때 이 세 가지 유지할 것.
   iOS 기기용 실사용 페이지이기도 하다: 재연결 시 같은 `MediaStream`/`<audio>`를 재사용해야 백그라운드에서도
   제스처 없이 복구된다. iOS는 `audio.volume`이 읽기 전용이라 볼륨 UI를 두지 않는다.
+- `signaling/` (Cloudflare Worker + Durable Object) — 호스트별 방에서 WebSocket 메시지 중계만. 같은 Worker가
+  `web/`을 정적 파일로 서빙. 저장하는 것은 호스트 인증값 해시(TOFU) 하나. `signaling_client.py` — 호스트 측:
+  `~/.config/crd-audio/pairing.json`의 hostId·pairKey, AES-GCM(AAD=hostId)으로 SDP 암복호화,
+  `server.create_answer()`로 answer 생성(LAN `/offer`와 공유). `web/index.html` — 폰용 클라이언트:
+  `#h=&k=` 페어링 → localStorage, 그 외 로직은 `static/index.html`과 같음 + stats에 경로(host/srflx/relay).
+  `crypto.subtle`은 보안 컨텍스트(https/localhost)에서만 되므로 폰 테스트는 배포본으로.
+  `<audio>`를 음소거하면 stats의 `level`은 0 — 신호 확인은 분석기(AnalyserNode)로.
 - `extension/` — MV3 크롬 확장. `content.js`가 CRD 페이지에 Shadow DOM 오버레이를 넣고
   RTCPeerConnection·AudioContext·GainNode를 직접 가진다(service worker 유휴 종료 회피).
   `/offer` POST만 `background.js`가 대신 보낸다: https 페이지의 content script에서 `http://<IP>`로

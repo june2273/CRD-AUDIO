@@ -23,13 +23,18 @@ import av
 import numpy as np
 import sounddevice as sd
 from aiohttp import web
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
+from aiortc import (MediaStreamTrack, RTCConfiguration, RTCIceServer, RTCPeerConnection,
+                    RTCSessionDescription)
+
+import signaling_client
 
 RATE = 48000
 CHANNELS = 2
 FRAME = 960  # 20ms @ 48kHz — Opus 프레임 크기와 일치
 MAX_QUEUE = 5  # 구독자당 최대 100ms 버퍼. 넘치면 오래된 프레임 버림 (지연 누적 방지)
 FRAME_BYTES = FRAME * CHANNELS * 2
+# STUN: 외부망에서 공인 주소 후보(srflx)를 얻어 홀펀칭. aiortc는 첫 STUN 서버만 쓴다
+ICE_CONFIG = RTCConfiguration(iceServers=[RTCIceServer(urls="stun:stun.cloudflare.com:3478")])
 SILENCE_RESTART = 60 * RATE // FRAME  # 완전 무음 60초 → 탭 재생성 (장시간 무음 버퍼 버그·출력 장치 변경 대응)
 
 log = logging.getLogger("sidecar")
@@ -251,25 +256,30 @@ async def stream_mp3(request):
     return resp
 
 
-async def offer(request):
-    params = await request.json()
-    pc = RTCPeerConnection()
-    request.app["pcs"].add(pc)
-    track = CaptureTrack(request.app["broadcaster"])
+async def create_answer(app, sdp, label):
+    """클라이언트 offer SDP → answer SDP. LAN(/offer)과 클라우드 시그널링이 공유한다."""
+    pc = RTCPeerConnection(ICE_CONFIG)
+    app["pcs"].add(pc)
+    track = CaptureTrack(app["broadcaster"])
     pc.addTrack(track)
 
     @pc.on("connectionstatechange")
     async def on_state():
-        log.info("peer %s: %s", request.remote, pc.connectionState)
+        log.info("peer %s: %s", label, pc.connectionState)
         if pc.connectionState in ("failed", "closed"):
             track.stop()
             await pc.close()
-            request.app["pcs"].discard(pc)
+            app["pcs"].discard(pc)
 
-    await pc.setRemoteDescription(RTCSessionDescription(sdp=params["sdp"], type=params["type"]))
+    await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="offer"))
     await pc.setLocalDescription(await pc.createAnswer())
-    return web.Response(content_type="application/json", text=json.dumps(
-        {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}))
+    return pc.localDescription.sdp
+
+
+async def offer(request):
+    params = await request.json()
+    sdp = await create_answer(request.app, params["sdp"], request.remote)
+    return web.Response(content_type="application/json", text=json.dumps({"sdp": sdp, "type": "answer"}))
 
 
 async def on_startup(app):
@@ -281,9 +291,19 @@ async def on_startup(app):
     await app["capture"].start()
     app["mp3"] = Mp3Encoder(app["broadcaster"], app["args"].bitrate)
     await app["mp3"].start()
+    if app["args"].signal:
+        pairing = signaling_client.load_pairing(app["args"].reset_pairing)
+        link = signaling_client.pairing_link(app["args"].signal, pairing)
+        print(f"\n기기 연결: 아래 QR을 폰 카메라로 스캔하거나 링크를 여세요 (키가 들어 있으니 공유 금지)\n{link}")
+        signaling_client.print_qr(link)
+        client = signaling_client.SignalingClient(
+            app["args"].signal, pairing, lambda sdp, label: create_answer(app, sdp, label))
+        app["signal"] = asyncio.create_task(client.run())
 
 
 async def on_shutdown(app):
+    if "signal" in app:
+        app["signal"].cancel()
     await app["mp3"].stop()
     await app["capture"].stop()
     await asyncio.gather(*(pc.close() for pc in app["pcs"]))
@@ -298,6 +318,8 @@ def main():
     p.add_argument("--audiotee", default=str(ROOT / "vendor/audiotee/.build/release/audiotee"))
     p.add_argument("--device", default="BlackHole 2ch", help="--capture blackhole일 때 입력 장치")
     p.add_argument("--bitrate", default="192k", help="MP3 스트림 비트레이트")
+    p.add_argument("--signal", help="클라우드 시그널링 주소 (예: wss://crd-audio.<계정>.workers.dev) — 외부망 연결")
+    p.add_argument("--reset-pairing", action="store_true", help="페어링 키 재발급 (기존 기기 연결 해제)")
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 

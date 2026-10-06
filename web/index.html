@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRD Audio</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; }
+  button { width: 100%; font-size: 22px; padding: 18px; border: 0; border-radius: 14px; background: #1a73e8; color: #fff; }
+  button.on { background: #5f6368; }
+  button:disabled { opacity: .4; }
+  #state { display: block; margin-top: 12px; color: #888; text-align: center; }
+  #stats { font: 12px monospace; color: #999; white-space: pre; margin-top: 24px; }
+  #unpaired { color: #888; line-height: 1.6; }
+</style>
+</head>
+<body>
+<h2>CRD Audio</h2>
+<p id="unpaired" hidden>아직 맥과 연결되지 않았습니다.<br>맥의 CRD Audio 화면에 나온 QR 코드를 카메라로 스캔하세요.</p>
+<button id="btn">연결</button><span id="state">끊김</span>
+<audio id="audio" autoplay playsinline></audio>
+<div id="stats"></div>
+<script>
+const btn = document.getElementById('btn');
+const stateEl = document.getElementById('state');
+const audio = document.getElementById('audio');
+const ICE = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
+let pc = null, ws = null, stream = null, timer = null, retryTimer = null, key = null;
+
+// 페어링: QR 링크의 #h=<hostId>&k=<pairKey>. '#' 뒤는 서버로 전송되지 않는다. 저장 후 주소창에서 지움
+const hash = new URLSearchParams(location.hash.slice(1));
+if (hash.get('h') && hash.get('k')) {
+  localStorage.setItem('pairing', JSON.stringify({ h: hash.get('h'), k: hash.get('k') }));
+  history.replaceState(null, '', location.pathname);
+}
+const pairing = JSON.parse(localStorage.getItem('pairing') ?? 'null');
+if (!pairing) { document.getElementById('unpaired').hidden = false; btn.disabled = true; stateEl.textContent = ''; }
+
+const b64 = { // base64url ↔ bytes
+  dec: s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)),
+  enc: b => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+};
+async function getKey() {
+  return key ??= await crypto.subtle.importKey('raw', b64.dec(pairing.k), 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+// AES-GCM, 추가 인증 데이터(AAD) = hostId → 다른 방의 메시지로 재사용 불가
+async function seal(obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(pairing.h) },
+                                        await getKey(), new TextEncoder().encode(JSON.stringify(obj)));
+  return { iv: b64.enc(iv), ct: b64.enc(ct) };
+}
+async function unseal(m) {
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64.dec(m.iv), additionalData: new TextEncoder().encode(pairing.h) },
+                                         await getKey(), b64.dec(m.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+// aiortc는 opus fmtp에 stereo=1을 넣지 않아서 Chrome이 모노로 다운믹스한다 → 직접 추가
+function stereo(sdp) {
+  const m = sdp.match(/a=rtpmap:(\d+) opus\/48000\/2/i);
+  if (!m) return sdp;
+  const pt = m[1];
+  const fmtp = new RegExp(`a=fmtp:${pt} (.*)`);
+  return fmtp.test(sdp)
+    ? sdp.replace(fmtp, (_, p) => `a=fmtp:${pt} ${p};stereo=1;sprop-stereo=1`)
+    : sdp.replace(m[0], `${m[0]}\r\na=fmtp:${pt} stereo=1;sprop-stereo=1`);
+}
+
+// 시그널링: 방에 클라이언트로 들어가 암호화된 offer를 보내고 answer 하나를 받으면 소켓을 닫는다
+function signal(offer) {
+  const peer = [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, '0')).join('');
+  return new Promise((resolve, reject) => {
+    ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws/${pairing.h}?role=client&peer=${peer}`);
+    const fail = msg => { ws.close(); reject(new Error(msg)); };
+    const t = setTimeout(() => fail('응답 없음'), 10000);
+    ws.onopen = async () => ws.send(JSON.stringify({ to: 'host', ...await seal({ type: 'offer', sdp: offer.sdp, peer }) }));
+    ws.onerror = () => fail('시그널링 서버 연결 실패');
+    ws.onmessage = async e => {
+      const m = JSON.parse(e.data);
+      if (m.error) return fail(m.error === 'host-offline' ? '맥 앱이 꺼져 있음' : m.error);
+      let answer;
+      try { answer = await unseal(m); } catch { return fail('페어링 키 불일치 — QR 다시 스캔'); }
+      if (answer.type !== 'answer' || answer.peer !== peer) return fail('잘못된 응답');
+      clearTimeout(t);
+      ws.close();
+      resolve(answer);
+    };
+  });
+}
+
+// iOS/iPadOS(WebKit)는 클릭 직후에만 재생을 허용하고, await를 지나면 허용이 만료된다.
+// → 클릭 시점에 빈 스트림으로 play()를 먼저 걸고, 재연결 때도 같은 스트림·엘리먼트를 계속 쓴다.
+function start() {
+  stream = new MediaStream();
+  audio.srcObject = stream;
+  audio.play().catch(e => { if (e.name !== 'AbortError') stateEl.textContent = '재생 차단: ' + e.name; });
+  if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: 'CRD Audio', artist: 'Mac' });
+  timer = setInterval(showStats, 1000);
+  connect();
+}
+
+async function connect() {
+  const p = pc = new RTCPeerConnection({ iceServers: ICE });
+  p.addTransceiver('audio', { direction: 'recvonly' });
+  p.ontrack = e => {
+    stream.getTracks().forEach(t => stream.removeTrack(t));
+    stream.addTrack(e.track);
+  };
+  p.onconnectionstatechange = () => {
+    if (p !== pc) return;
+    if (p.connectionState === 'failed') retry('연결 끊김');
+    else stateEl.textContent = { connected: '연결됨', connecting: '연결 중' }[p.connectionState] ?? p.connectionState;
+  };
+  stateEl.textContent = '연결 중';
+  try {
+    const offer = await p.createOffer();
+    offer.sdp = stereo(offer.sdp);
+    await p.setLocalDescription(offer);
+    // aiortc는 ICE 후보를 trickle하지 않으므로 수집 완료 후 한 번에 보낸다
+    await new Promise(r => {
+      if (p.iceGatheringState === 'complete') return r();
+      p.addEventListener('icegatheringstatechange', () => p.iceGatheringState === 'complete' && r());
+    });
+    const answer = await signal(p.localDescription);
+    if (p === pc) await p.setRemoteDescription({ type: 'answer', sdp: stereo(answer.sdp) });
+  } catch (e) {
+    if (p === pc) retry(e.message);
+  }
+}
+
+function retry(err) {
+  pc.close(); pc = null;
+  stateEl.textContent = err + ' — 3초 후 재연결';
+  retryTimer = setTimeout(connect, 3000);
+}
+
+async function showStats() {
+  if (!pc) return;
+  const stats = await pc.getStats();
+  let route = '-';
+  stats.forEach(s => {
+    if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') {
+      const local = stats.get(s.localCandidateId), remote = stats.get(s.remoteCandidateId);
+      route = `${local?.candidateType} → ${remote?.candidateType}`;  // host=같은 망, srflx=홀펀칭, relay=TURN
+    }
+  });
+  stats.forEach(s => {
+    if (s.type === 'inbound-rtp' && s.kind === 'audio') {
+      const jb = s.jitterBufferEmittedCount ? (s.jitterBufferDelay / s.jitterBufferEmittedCount * 1000).toFixed(0) : '-';
+      document.getElementById('stats').textContent =
+        `route: ${route}\npackets: ${s.packetsReceived}  lost: ${s.packetsLost}\njitter buffer: ${jb} ms\nlevel: ${(s.audioLevel ?? 0).toFixed(3)}\naudio: ${audio.paused ? 'paused' : 'playing'}`;
+    }
+  });
+}
+
+function stop() {
+  clearInterval(timer);
+  clearTimeout(retryTimer);
+  ws?.close();
+  pc?.close(); pc = null;
+  audio.srcObject = stream = null;
+  stateEl.textContent = '끊김';
+}
+
+btn.onclick = () => {
+  const on = !stream;
+  on ? start() : stop();
+  btn.textContent = on ? '끊기' : '연결';
+  btn.classList.toggle('on', on);
+};
+</script>
+</body>
+</html>

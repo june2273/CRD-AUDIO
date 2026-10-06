@@ -68,6 +68,15 @@ python3.12 -m venv .venv
 
 문제가 생기면 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)의 빠른 진단 표부터 볼 것.
 
+## 외부망 연결 (실험 중)
+
+집 밖(LTE 등)에서 들으려면 클라우드 시그널링을 쓴다. 소리는 P2P로 직접 가고 서버는 암호화된 연결 정보만 중계한다.
+설계와 진행 상황은 [DEPLOYMENT.md](DEPLOYMENT.md).
+
+```bash
+.venv/bin/python server.py --signal wss://crd-audio.<계정>.workers.dev   # 터미널에 나온 QR을 폰 카메라로 스캔
+```
+
 ## 파일
 
 | 파일 | 역할 |
@@ -77,6 +86,8 @@ python3.12 -m venv .venv
 | `extension/` | 크롬 확장 (MV3): `content.js` 오버레이·WebRTC·볼륨, `background.js` 시그널링 중계, `popup.*` 서버 주소 |
 | `capture_test.py` | 캡처 검증용 WAV 녹음 (`--tap`: audiotee, 기본: BlackHole) |
 | `build_audiotee.sh` | audiotee 고정 커밋 빌드 |
+| `signaling/`, `web/`, `signaling_client.py` | 외부망용 클라우드 시그널링 Worker, 폰 클라이언트, 호스트 측 접속 |
+| `DEPLOYMENT.md` | 일반 사용자 배포 설계 |
 | `CLAUDE.md` | 설계 배경, 단계별 계획, 알려진 함정 |
 | `TROUBLESHOOTING.md` | 실제로 겪은 문제와 해결 기록 |
 

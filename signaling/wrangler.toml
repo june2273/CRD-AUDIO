@@ -1,0 +1,16 @@
+name = "crd-audio"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# 웹 클라이언트(web/)도 같은 Worker가 정적 파일로 서빙한다. 파일이 없는 경로(/ws/...)만 Worker 코드로 간다.
+[assets]
+directory = "../web"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+# 무료 플랜은 SQLite 기반 Durable Object만 지원
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
