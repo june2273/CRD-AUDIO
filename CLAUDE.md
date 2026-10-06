@@ -8,6 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > (손실 0, 지터버퍼 약 128ms).
 > Phase 2 구현됨 — `/stream.mp3` (48kHz 스테레오 192kbps) curl 수신 검증. 휴대폰 VLC 실기 확인 필요.
 
+**문제를 겪고 해결하면 `TROUBLESHOOTING.md`에 기록할 것** (빠른 진단 표 + 증상/원인/진단/해결).
+미해결 항목은 "진행 중"으로 남기고 결과 확인 후 갱신. 사용자용 설치·사용법은 `README.md`.
+
 ## 명령어
 
 ```bash
