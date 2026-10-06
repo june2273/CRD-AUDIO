@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "CRD Audio Sidecar",
+  "version": "0.1.0",
+  "description": "크롬 원격데스크톱 화면 위에서 맥미니 사이드카 오디오(WebRTC)를 켜고 끄고 볼륨을 조절한다.",
+  "permissions": ["storage"],
+  "optional_host_permissions": ["http://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "CRD Audio Sidecar" },
+  "content_scripts": [
+    { "matches": ["https://remotedesktop.google.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ]
+}

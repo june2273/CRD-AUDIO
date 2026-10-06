@@ -97,6 +97,11 @@
 - **Chrome 모노 다운믹스:** aiortc는 Opus fmtp에 `stereo=1`을 넣지 않아 Chrome이 모노로 재생한다.
   → 테스트 페이지에서 offer/answer SDP 모두에 `stereo=1;sprop-stereo=1` 추가. `getStats()`로 `ch=2` 확인.
 - **aiortc는 trickle ICE 미지원:** ICE 수집 완료 후 offer를 한 번에 전송.
+- **확장의 mixed content / 사설망 접근:** CRD는 https 페이지라 content script에서 `http://192.168.x.x`로
+  fetch하면 차단된다. → 시그널링 POST만 service worker(`background.js`)가 호스트 권한으로 대신 보낸다.
+  WebRTC 미디어 자체는 mixed content 대상이 아니라 content script에서 그대로 연결된다.
+- **Chrome의 원격 WebRTC 트랙 → Web Audio 무음:** `createMediaStreamSource`만 쓰면 무음이 되는 Chrome 동작이 있어
+  음소거된 `<audio>`에도 같은 스트림을 붙인다. 로컬 테스트에서 GainNode 앞 분석기로 440Hz 수신 확인.
 - **Python 3.14 회피:** aiortc/PyAV 휠 호환성 때문에 3.12로 가상환경 구성.
 - **서버 로그의 `.local could not be resolved` 경고:** Chrome의 mDNS 후보 은닉 때문.
   peer reflexive 후보로 연결되므로 무시해도 된다. 다른 기기에서 연결이 안 될 때만 의심.

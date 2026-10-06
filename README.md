@@ -5,6 +5,7 @@
 
 ```
 맥미니 시스템 오디오 → BlackHole 2ch → server.py ─┬→ WebRTC (Opus)  → 데스크톱/아이패드 브라우저  (~0.15초)
+                                                 │                    └→ 크롬 확장: CRD 화면 위 스피커 토글/볼륨
                                                  └→ HTTP MP3       → 휴대폰 VLC                (1~3초, 백그라운드 재생)
 ```
 
@@ -46,6 +47,15 @@ python3.12 -m venv .venv
 
    맥미니 IP 확인: `ipconfig getifaddr en0`
 
+### 크롬 확장 (데스크톱 CRD 화면 위 스피커 버튼)
+
+1. 접속하는 컴퓨터의 크롬에서 `chrome://extensions` → 우측 상단 **개발자 모드** 켜기
+2. **압축해제된 확장 프로그램을 로드** → 이 저장소의 `extension/` 폴더 선택
+3. 툴바의 확장 아이콘 → 서버 주소(`192.168.1.23:8080` 형식) 입력 → **저장** → 접근 권한 **허용**
+4. `remotedesktop.google.com`에서 CRD 접속 → 왼쪽 아래 🔇 버튼 클릭 → 🔊 + 초록 점이면 연결됨.
+   마우스를 올리면 볼륨 슬라이더(0~200%)가 나온다. 켜짐 상태와 볼륨은 기억되어 다음 접속 때 자동 연결
+   (새로고침 직후엔 브라우저 정책상 페이지를 한 번 클릭해야 소리가 난다).
+
 > ⚠️ **맥미니 자신의 브라우저로 접속하지 말 것.** 출력이 BlackHole이면 받은 소리가 다시 캡처되어
 > 하울링(피드백 루프)이 생긴다.
 
@@ -57,6 +67,7 @@ python3.12 -m venv .venv
 |---|---|
 | `server.py` | 캡처 → WebRTC(`/offer`) + MP3 스트림(`/stream.mp3`) 서버 |
 | `static/index.html` | WebRTC 테스트 페이지 (연결 버튼, 수신 통계) |
+| `extension/` | 크롬 확장 (MV3): `content.js` 오버레이·WebRTC·볼륨, `background.js` 시그널링 중계, `popup.*` 서버 주소 |
 | `capture_test.py` | BlackHole 캡처 검증용 WAV 녹음 |
 | `CLAUDE.md` | 설계 배경, 단계별 계획, 알려진 함정 |
 | `TROUBLESHOOTING.md` | 실제로 겪은 문제와 해결 기록 |
@@ -65,5 +76,5 @@ python3.12 -m venv .venv
 
 - [x] Phase 1 — BlackHole 캡처 + WebRTC (아이패드에서 확인)
 - [x] Phase 2 — 모바일용 HTTP MP3 스트림 (휴대폰 VLC에서 지연 약 2초 확인)
-- [ ] Phase 3 — 크롬 확장 (CRD 화면 위 스피커 토글 / 볼륨)
+- [ ] Phase 3 — 크롬 확장 (CRD 화면 위 스피커 토글 / 볼륨) — 구현·로컬 검증 완료, 실제 CRD 화면에서 확인 대기
 - [ ] Phase 4 — Core Audio 탭(`audiotee`)으로 캡처 교체, BlackHole 의존 제거

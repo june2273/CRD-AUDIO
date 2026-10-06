@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > **현재 상태 (2026-10-06):** Phase 1 완료 — 시스템 출력(BlackHole) → 아이패드 크롬에서 소리 확인됨
 > (손실 0, 지터버퍼 약 128ms).
 > Phase 2 완료 — `/stream.mp3` (48kHz 스테레오 192kbps), 휴대폰 VLC에서 지연 약 2초 확인
-> (서버 경로 자체는 약 0.4초, 나머지는 VLC 버퍼). 다음은 Phase 3 (크롬 확장).
+> (서버 경로 자체는 약 0.4초, 나머지는 VLC 버퍼).
+> Phase 3 구현 — `extension/` (로컬에서 연결·Web Audio 경로 440Hz 수신 확인). 실제 CRD 화면에서 확인 대기.
 
 **문제를 겪고 해결하면 `TROUBLESHOOTING.md`에 기록할 것** (빠른 진단 표 + 증상/원인/진단/해결).
 미해결 항목은 "진행 중"으로 남기고 결과 확인 후 갱신. 사용자용 설치·사용법은 `README.md`.
@@ -37,6 +38,14 @@ curl -s -m 6 -o /tmp/t.mp3 http://127.0.0.1:8080/stream.mp3 && ffprobe /tmp/t.mp
   `await` 이후에 `srcObject`를 붙이면 stats의 level은 올라오는데 무음이 된다 → 클릭 시점에 빈
   `MediaStream`으로 `play()`를 먼저 걸고 `ontrack`에서 트랙을 추가한다.
   Phase 3 확장 content script로 옮길 때 이 세 가지 유지할 것.
+- `extension/` — MV3 크롬 확장. `content.js`가 CRD 페이지에 Shadow DOM 오버레이를 넣고
+  RTCPeerConnection·AudioContext·GainNode를 직접 가진다(service worker 유휴 종료 회피).
+  `/offer` POST만 `background.js`가 대신 보낸다: https 페이지의 content script에서 `http://<IP>`로
+  fetch하면 mixed content로 막히기 때문. 서버 주소는 popup에서 저장하며 그때 해당 호스트 권한을
+  `optional_host_permissions`로 요청한다. 원격 트랙은 음소거된 `<audio>`에도 붙여 둔다(안 붙이면
+  Chrome에서 Web Audio 경로가 무음). 오버레이 이벤트는 CRD로 전파되지 않게 막는다.
+  테스트: 사이드카 페이지(`http://127.0.0.1:8080`)에 `chrome.runtime/storage` shim + content.js를
+  주입하면 확장 설치 없이 동작 확인 가능 (볼륨 0으로 — 호스트 재생은 피드백 루프).
 
 ## 1. 한 줄 요약
 
