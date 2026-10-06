@@ -2,7 +2,11 @@
 
 > **진행 상황 (2026-10-06):** 스파이크 A 로컬 검증 완료 — `signaling/`(Worker) + `web/`(클라이언트) +
 > `signaling_client.py`. 로컬 wrangler에서 암호화 시그널링으로 연결·440Hz 수신, 가짜 호스트 403,
-> 잘못된 키 무응답, 호스트 꺼짐 알림 확인. **다음: Cloudflare 배포 → 아이폰 LTE에서 확인.**
+> 잘못된 키 무응답, 호스트 꺼짐 알림 확인.
+> 배포(`crd-audio.crd-audio-signaling.workers.dev`) 후 아이폰 LTE: 시그널링 성공, STUN만으로는 P2P 실패
+> (통신사 NAT) → Cloudflare TURN 폴백 추가 후 **LTE에서 소리 확인**.
+> 이 환경: 맥에 공인 IPv6 없음, 공유기 UPnP IGD 응답 있음 → TURN 사용량을 줄이는 UPnP 포트 매핑 검토 중.
+> TURN 요금: 계정당 월 1,000GB 무료(SFU와 공유), 초과 $0.05/GB.
 
 ## Context
 Phase 1~4로 "맥 호스트 소리를 CRD 옆 채널로 보낸다"는 개념은 사용자 환경에서 증명됐다
