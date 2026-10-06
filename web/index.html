@@ -101,8 +101,19 @@ function start() {
   connect();
 }
 
+// TURN 중계 자격 (P2P가 안 뚫리는 모바일망용). 못 받아도 STUN만으로 계속 진행
+async function iceServers() {
+  try {
+    const r = await fetch(`/turn/${pairing.h}`);
+    if (r.ok) return [...ICE, ...(await r.json()).iceServers];
+  } catch {}
+  return ICE;
+}
+
 async function connect() {
-  const p = pc = new RTCPeerConnection({ iceServers: ICE });
+  stateEl.textContent = '연결 후보 수집 중';
+  const p = pc = new RTCPeerConnection({ iceServers: await iceServers() });
+  if (!stream) { p.close(); return; }  // 기다리는 동안 끊기를 눌렀음
   p.addTransceiver('audio', { direction: 'recvonly' });
   p.ontrack = e => {
     stream.getTracks().forEach(t => stream.removeTrack(t));
@@ -111,19 +122,22 @@ async function connect() {
   p.onconnectionstatechange = () => {
     if (p !== pc) return;
     if (p.connectionState === 'failed') retry('연결 끊김');
-    else stateEl.textContent = { connected: '연결됨', connecting: '연결 중' }[p.connectionState] ?? p.connectionState;
+    else stateEl.textContent = { connected: '연결됨', connecting: 'P2P 연결 시도 중' }[p.connectionState] ?? p.connectionState;
   };
-  stateEl.textContent = '연결 중';
   try {
     const offer = await p.createOffer();
     offer.sdp = stereo(offer.sdp);
     await p.setLocalDescription(offer);
-    // aiortc는 ICE 후보를 trickle하지 않으므로 수집 완료 후 한 번에 보낸다
+    // aiortc는 ICE 후보를 trickle하지 않으므로 수집 완료 후 한 번에 보낸다.
+    // 모바일망에선 STUN/TURN 응답이 늦거나 'complete'가 안 오기도 해서 5초에서 끊고 모인 후보로 보낸다
     await new Promise(r => {
       if (p.iceGatheringState === 'complete') return r();
       p.addEventListener('icegatheringstatechange', () => p.iceGatheringState === 'complete' && r());
+      setTimeout(r, 5000);
     });
+    stateEl.textContent = '맥에 연결 요청 중';
     const answer = await signal(p.localDescription);
+    stateEl.textContent = 'P2P 연결 시도 중';
     if (p === pc) await p.setRemoteDescription({ type: 'answer', sdp: stereo(answer.sdp) });
   } catch (e) {
     if (p === pc) retry(e.message);
@@ -136,23 +150,25 @@ function retry(err) {
   retryTimer = setTimeout(connect, 3000);
 }
 
+// 진단: 후보 종류(host=같은 망, srflx=STUN으로 얻은 공인 주소, relay=TURN)와 선택된 경로
 async function showStats() {
   if (!pc) return;
   const stats = await pc.getStats();
-  let route = '-';
+  const types = kind => [...new Set([...stats.values()].filter(s => s.type === kind).map(s => s.candidateType))].join(',') || '-';
+  let route = '-', pairs = 0, audioLine = '';
   stats.forEach(s => {
-    if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') {
-      const local = stats.get(s.localCandidateId), remote = stats.get(s.remoteCandidateId);
-      route = `${local?.candidateType} → ${remote?.candidateType}`;  // host=같은 망, srflx=홀펀칭, relay=TURN
+    if (s.type === 'candidate-pair') {
+      pairs++;
+      if (s.nominated && s.state === 'succeeded')
+        route = `${stats.get(s.localCandidateId)?.candidateType} → ${stats.get(s.remoteCandidateId)?.candidateType}`;
     }
-  });
-  stats.forEach(s => {
     if (s.type === 'inbound-rtp' && s.kind === 'audio') {
       const jb = s.jitterBufferEmittedCount ? (s.jitterBufferDelay / s.jitterBufferEmittedCount * 1000).toFixed(0) : '-';
-      document.getElementById('stats').textContent =
-        `route: ${route}\npackets: ${s.packetsReceived}  lost: ${s.packetsLost}\njitter buffer: ${jb} ms\nlevel: ${(s.audioLevel ?? 0).toFixed(3)}\naudio: ${audio.paused ? 'paused' : 'playing'}`;
+      audioLine = `\npackets: ${s.packetsReceived}  lost: ${s.packetsLost}\njitter buffer: ${jb} ms\nlevel: ${(s.audioLevel ?? 0).toFixed(3)}\naudio: ${audio.paused ? 'paused' : 'playing'}`;
     }
   });
+  document.getElementById('stats').textContent =
+    `ice: ${pc.iceGatheringState} / ${pc.iceConnectionState}\nlocal: ${types('local-candidate')}  remote: ${types('remote-candidate')}  pairs: ${pairs}\nroute: ${route}` + audioLine;
 }
 
 function stop() {

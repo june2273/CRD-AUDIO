@@ -5,13 +5,15 @@ import { DurableObject } from 'cloudflare:workers';
 
 const MAX_CLIENTS = 8;
 const MAX_MESSAGE = 16 * 1024;
+const TURN_TTL = 3 * 3600;      // 클라이언트에 주는 TURN 자격 유효시간(초)
+const TURN_PER_HOUR = 30;       // 방(호스트)당 시간당 TURN 자격 발급 한도 — 남용 방지
 
 export default {
   async fetch(req, env) {
-    const m = new URL(req.url).pathname.match(/^\/ws\/([0-9a-f]{32})$/);
+    const m = new URL(req.url).pathname.match(/^\/(ws|turn)\/([0-9a-f]{32})$/);
     if (!m) return new Response('not found', { status: 404 });
-    if (req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
-    return env.ROOM.get(env.ROOM.idFromName(m[1])).fetch(req);
+    if (m[1] === 'ws' && req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
+    return env.ROOM.get(env.ROOM.idFromName(m[2])).fetch(req);
   },
 };
 
@@ -22,6 +24,7 @@ async function sha256hex(s) {
 
 export class Room extends DurableObject {
   async fetch(req) {
+    if (new URL(req.url).pathname.startsWith('/turn/')) return this.turn();
     const q = new URL(req.url).searchParams;
     const role = q.get('role');
     let peer;
@@ -46,6 +49,29 @@ export class Room extends DurableObject {
     this.ctx.acceptWebSocket(server, [role, 'p:' + peer]);
     server.serializeAttachment({ peer });
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  // 모바일망(통신사 NAT)에서 P2P가 안 뚫릴 때 쓰는 TURN 중계 자격. 소리는 DTLS-SRTP로 암호화된 채 중계된다.
+  // 맥이 접속해 있는 방에만, 시간당 한도 안에서 발급 (hostId는 페어링한 기기만 안다)
+  async turn() {
+    const json = (body, status = 200) => Response.json(body, { status });
+    if (!this.env.TURN_KEY_ID || !this.env.TURN_KEY_API_TOKEN) return json({ error: 'turn-not-configured' }, 503);
+    if (!this.ctx.getWebSockets('host').length) return json({ error: 'host-offline' }, 404);
+    const now = Date.now();
+    let rl = (await this.ctx.storage.get('turnRate')) ?? { start: now, count: 0 };
+    if (now - rl.start > 3600_000) rl = { start: now, count: 0 };
+    if (++rl.count > TURN_PER_HOUR) return json({ error: 'rate-limited' }, 429);
+    await this.ctx.storage.put('turnRate', rl);
+    const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${this.env.TURN_KEY_ID}/credentials/generate-ice-servers`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.env.TURN_KEY_API_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ttl: TURN_TTL }),
+    });
+    if (!r.ok) return json({ error: `turn-api-${r.status}` }, 502);
+    const { iceServers } = await r.json();
+    // 브라우저가 막는 53번 포트 URL은 뺀다 (Cloudflare 문서 권고)
+    for (const s of iceServers) s.urls = [].concat(s.urls).filter(u => !/:53(\?|$)/.test(u));
+    return json({ iceServers: iceServers.filter(s => s.urls.length) });
   }
 
   async webSocketMessage(ws, raw) {
