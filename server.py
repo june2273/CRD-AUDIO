@@ -27,6 +27,7 @@ from aiortc import (MediaStreamTrack, RTCConfiguration, RTCIceServer, RTCPeerCon
                     RTCSessionDescription)
 
 import signaling_client
+import upnp
 
 RATE = 48000
 CHANNELS = 2
@@ -263,6 +264,8 @@ async def create_answer(app, sdp, label):
     track = CaptureTrack(app["broadcaster"])
     pc.addTrack(track)
 
+    mapped = None  # UPnP로 연 외부 포트
+
     @pc.on("connectionstatechange")
     async def on_state():
         log.info("peer %s: %s", label, pc.connectionState)
@@ -270,10 +273,22 @@ async def create_answer(app, sdp, label):
             track.stop()
             await pc.close()
             app["pcs"].discard(pc)
+            if mapped:
+                await app["upnp"].delete_udp(mapped)
 
     await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="offer"))
     await pc.setLocalDescription(await pc.createAnswer())
-    return pc.localDescription.sdp
+    answer = pc.localDescription.sdp
+    gw = app.get("upnp")
+    if gw:
+        # 공유기에 이 연결의 UDP 포트를 매핑하고 "공인IP:포트"를 후보로 추가 → 폰이 TURN 없이 직접 닿게
+        gatherer = pc.getTransceivers()[0].sender.transport.transport.iceGatherer
+        lan = next((c for c in gatherer.getLocalCandidates() if c.type == "host" and c.ip == gw.local_ip), None)
+        if lan and (mapped := await gw.add_udp(lan.port)):
+            line = upnp.srflx_candidate(gw.external_ip, mapped, lan.ip, lan.port)
+            answer = answer.replace("a=end-of-candidates", f"{line}\r\na=end-of-candidates", 1)
+            log.info("upnp: %s:%d → %s:%d (peer %s)", gw.external_ip, mapped, lan.ip, lan.port, label)
+    return answer
 
 
 async def offer(request):
@@ -291,6 +306,15 @@ async def on_startup(app):
     await app["capture"].start()
     app["mp3"] = Mp3Encoder(app["broadcaster"], app["args"].bitrate)
     await app["mp3"].start()
+    if app["args"].upnp:
+        app["upnp"] = await upnp.Gateway.find()
+        if app["upnp"]:
+            log.info("upnp gateway %s (external %s, local %s)",
+                     app["upnp"].control_url, app["upnp"].external_ip, app["upnp"].local_ip)
+            if stale := await app["upnp"].cleanup():
+                log.info("upnp: 이전 실행에서 남은 매핑 %d개 삭제", len(stale))
+        else:
+            log.warning("upnp: 공유기를 찾지 못함 (UPnP 꺼짐?) — TURN 폴백만 사용")
     if app["args"].signal:
         pairing = signaling_client.load_pairing(app["args"].reset_pairing)
         link = signaling_client.pairing_link(app["args"].signal, pairing)
@@ -319,6 +343,7 @@ def main():
     p.add_argument("--device", default="BlackHole 2ch", help="--capture blackhole일 때 입력 장치")
     p.add_argument("--bitrate", default="192k", help="MP3 스트림 비트레이트")
     p.add_argument("--signal", help="클라우드 시그널링 주소 (예: wss://crd-audio.<계정>.workers.dev) — 외부망 연결")
+    p.add_argument("--upnp", action="store_true", help="공유기 UPnP로 포트 매핑 (실험: TURN 없이 외부망 직접 연결)")
     p.add_argument("--reset-pairing", action="store_true", help="페어링 키 재발급 (기존 기기 연결 해제)")
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")

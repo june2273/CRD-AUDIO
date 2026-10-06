@@ -101,8 +101,10 @@ function start() {
   connect();
 }
 
-// TURN 중계 자격 (P2P가 안 뚫리는 모바일망용). 못 받아도 STUN만으로 계속 진행
+// TURN 중계 자격 (P2P가 안 뚫리는 모바일망용). 못 받아도 STUN만으로 계속 진행.
+// 실험용: 주소에 ?turn=0 이면 TURN 없이 (UPnP 직접 연결 검증)
 async function iceServers() {
+  if (new URLSearchParams(location.search).get('turn') === '0') return ICE;
   try {
     const r = await fetch(`/turn/${pairing.h}`);
     if (r.ok) return [...ICE, ...(await r.json()).iceServers];
