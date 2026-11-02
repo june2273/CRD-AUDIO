@@ -246,7 +246,6 @@ Phase 1이 완전히 돌아간 뒤에만 착수. **캡처 부분만** 갈아끼�
 | 오디오 인터페이스 | Topping E2x2 |
 | 가상 오디오 | BlackHole 2ch (설치됨) |
 | 터미널 | iTerm2 |
-| 외장 SSD | `/Volumes/june2_07ssd` |
 | 보유 IDE | PyCharm, IntelliJ, VS Code |
 | OS | **macOS 27.0.1** |
 | Swift 직접 개발 시 | Xcode 설치 필요 (App Store, 10GB+) — 단, 8번 참고 |

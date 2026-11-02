@@ -5,6 +5,11 @@
 크롬 원격데스크톱(CRD)은 macOS 호스트의 소리를 전송하지 않는다.
 화면은 CRD 그대로 쓰고, **소리만 별도 경로로 보내는 사이드카 서버**.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/stack-dark.png">
+  <img src="docs/stack.png" alt="맥에서 audiotee(Core Audio 탭)가 20ms PCM을 server.py로 보내고, server.py가 WebRTC Opus로 CRD 화면 위 크롬 확장과 아이폰 Safari(약 0.13초)에, ffmpeg MP3로 VLC(약 2초)에 소리를 보낸다. 외부망에서는 직접 배포한 Cloudflare Worker·Durable Object가 암호화된 시그널링을 중계하고 본인 TURN 키로 중계 자격을 발급한다" width="100%">
+</picture>
+
 ```
 맥미니 시스템 오디오 → Core Audio 탭(audiotee) → server.py ─┬→ WebRTC (Opus)  → 데스크톱/아이패드 브라우저  (~0.15초)
                                                         │                    └→ 크롬 확장: CRD 화면 위 스피커 토글/볼륨
@@ -75,8 +80,11 @@ python3.12 -m venv .venv
 집 밖(LTE 등)에서 들으려면 클라우드 시그널링을 쓴다. 소리는 P2P로 직접 가고 서버는 암호화된 연결 정보만 중계한다.
 설계와 진행 상황은 [DEPLOYMENT.md](DEPLOYMENT.md).
 
+운영 중인 공용 서버는 없다. `signaling/`을 **본인 Cloudflare 계정**에 배포하고, TURN 폴백이 필요하면 **본인 Cloudflare Realtime TURN 키**를 넣는다
+(`signaling/.env.example`을 `.dev.vars`로 복사, 배포 시 `npx wrangler secret put TURN_KEY_ID` / `TURN_KEY_API_TOKEN`). TURN 값이 없으면 시그널링만 동작한다.
+
 ```bash
-.venv/bin/python server.py --signal wss://crd-audio.<계정>.workers.dev   # 터미널에 나온 QR을 폰 카메라로 스캔
+.venv/bin/python server.py --signal wss://<내-worker>.<내-계정>.workers.dev   # 터미널에 나온 QR을 폰 카메라로 스캔
 ```
 
 ## 파일
